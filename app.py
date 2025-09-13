@@ -1,41 +1,61 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from joblib import load
 import json
 from pathlib import Path
-import requests
 
 st.set_page_config(page_title="🏠 House Price (€/m²) Predictor", layout="centered")
 
+# -------------------- Config --------------------
 MODEL_PATH = Path("rf_price_per_m2.joblib")
-if not MODEL_PATH.exists():
-    st.warning("Downloading model file... (first run only)")
-    url = "https://drive.google.com/file/d/1vPIL6uwvfknWttb4CzS8WDogmUI2i0nf/view?usp=drive_link"
-    r = requests.get(url)
-    MODEL_PATH.write_bytes(r.content)
-FEATURES_PATH = "rf_price_features.json"
-CHOICES_PATH = "choices.json"
+FEATURES_PATH = Path("rf_price_features.json")
+CHOICES_PATH = Path("choices.json")
 
+# Google Drive file ID of your model (share link -> the long id in the URL)
+GDRIVE_FILE_ID = "1vPIL6uwvfknWttb4CzS8WDogmUI2i0nf"
+
+# -------------------- Ensure model present --------------------
+def ensure_model():
+    if MODEL_PATH.exists():
+        return
+    st.warning("Downloading model file (first run only)…")
+    try:
+        import gdown  # make sure gdown is in requirements.txt
+        gdown.download(id=GDRIVE_FILE_ID, output=str(MODEL_PATH), quiet=False)
+        if not MODEL_PATH.exists() or MODEL_PATH.stat().st_size < 10_000_000:
+            raise RuntimeError("Downloaded file looks too small or missing.")
+    except Exception as e:
+        st.error(f"Model download failed: {e}")
+        st.stop()
+
+ensure_model()
+
+# -------------------- Load assets --------------------
 @st.cache_resource
 def load_assets():
+    if not FEATURES_PATH.exists():
+        st.error(f"Missing {FEATURES_PATH.name} in repo.")
+        st.stop()
     model = load(MODEL_PATH)
-    features = json.load(open(FEATURES_PATH))
-    choices = json.load(open(CHOICES_PATH)) if Path(CHOICES_PATH).exists() else {}
+    features = json.load(open(FEATURES_PATH, "r", encoding="utf-8"))
+    choices = json.load(open(CHOICES_PATH, "r", encoding="utf-8")) if CHOICES_PATH.exists() else {}
     return model, features, choices
 
 model, features, choices = load_assets()
 
-# Original feature names in your model
+# Original training schema
 cat_cols = ["Town", "Type"]
 num_cols = [c for c in features if c not in cat_cols]
 
+# -------------------- UI --------------------
 st.title("🏠 House Price (€/m²) Predictor")
 
 with st.form("inputs"):
     c1, c2 = st.columns(2)
     inputs = {}
 
-    # --- Town (searchable) + manual override ---
+    # Town (searchable) + manual override
     with c1:
         town_opts = choices.get("Town", [])
         town_sel = st.selectbox(
@@ -47,7 +67,7 @@ with st.form("inputs"):
         town_manual = st.text_input("Or enter Town manually (optional)", value="")
         inputs["Town"] = (town_manual.strip() or (town_sel or "")).strip()
 
-    # --- Type (searchable) ---
+    # Type (searchable)
     with c2:
         type_opts = choices.get("Type", [])
         type_sel = st.selectbox(
@@ -58,10 +78,9 @@ with st.form("inputs"):
         )
         inputs["Type"] = (type_sel or "").strip()
 
-    # --- Numeric fields with requested labels/behavior ---
-    # defaults
+    # Defaults
     defaults = {
-        "TotalArea": 80,                # int only
+        "TotalArea": 80,
         "TotalRooms": 3,
         "NumberOfBathrooms": 1,
         "Parking": 0,
@@ -72,7 +91,7 @@ with st.form("inputs"):
         "no_transit_route": 0
     }
 
-    # Left column fields
+    # Left column
     with c1:
         inputs["TotalArea"] = st.number_input("Total Area", value=int(defaults["TotalArea"]),
                                               step=1, min_value=0, format="%d")
@@ -87,7 +106,7 @@ with st.form("inputs"):
         inputs["drive_km_final"] = st.number_input("Distance by Car to City Center (km)",
                                                    value=float(defaults["drive_km_final"]))
 
-    # Right column fields
+    # Right column
     with c2:
         inputs["NumberOfBathrooms"] = st.number_input("Number of Bathrooms", value=int(defaults["NumberOfBathrooms"]),
                                                       step=1, min_value=0, format="%d")
@@ -104,9 +123,9 @@ with st.form("inputs"):
 
 st.caption("ℹ️ Travel times were computed assuming departure at **08:00** on a **weekday**.")
 
+# -------------------- Predict --------------------
 if submitted:
-    # Build the row strictly in training feature order
-    row = {k: inputs.get(k, None) for k in features}
+    row = {k: inputs.get(k, None) for k in features}  # keep training order
     X = pd.DataFrame([row])
     try:
         ppm2 = float(model.predict(X)[0])
