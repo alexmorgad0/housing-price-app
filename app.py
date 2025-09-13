@@ -1,4 +1,4 @@
-# app.py (drop-in)
+# app.py
 import streamlit as st
 import pandas as pd
 from joblib import load
@@ -10,8 +10,9 @@ st.set_page_config(page_title="🏠 House Price (€/m²) Predictor", layout="ce
 MODEL_PATH = Path("rf_price_per_m2.joblib")
 FEATURES_PATH = Path("rf_price_features.json")
 CHOICES_PATH = Path("choices.json")
-GDRIVE_FILE_ID = "1vPIL6uwvfknWttb4CzS8WDogmUI2i0nf"  # <-- your Drive file id
+GDRIVE_FILE_ID = "1vPIL6uwvfknWttb4CzS8WDogmUI2i0nf"  # your Drive file id
 
+# ---------- ensure model present ----------
 def ensure_model():
     if MODEL_PATH.exists():
         return
@@ -25,10 +26,10 @@ def ensure_model():
         st.error(f"Model download failed: {e}")
         st.stop()
 
+# ---------- robust JSON loader ----------
 def read_json_resilient(path: Path, default):
     if not path.exists():
         return default
-    # try utf-8 then latin-1; if both fail, fall back
     for enc in ("utf-8", "latin-1"):
         try:
             with open(path, "r", encoding=enc, errors="strict") as f:
@@ -36,6 +37,27 @@ def read_json_resilient(path: Path, default):
         except Exception:
             continue
     return default
+
+# ---------- sklearn 1.3 -> 1.7 compatibility shim ----------
+def patch_forest_monotonic(model):
+    """Add missing .monotonic_cst attribute to DecisionTreeRegressor estimators."""
+    try:
+        from sklearn.tree import DecisionTreeRegressor
+        # RandomForestRegressor
+        if hasattr(model, "estimators_"):
+            for est in model.estimators_:
+                if isinstance(est, DecisionTreeRegressor) and not hasattr(est, "monotonic_cst"):
+                    est.monotonic_cst = None
+        # Pipeline -> last step could be a RF
+        if hasattr(model, "steps"):
+            last = model.steps[-1][1]
+            if hasattr(last, "estimators_"):
+                for est in last.estimators_:
+                    if isinstance(est, DecisionTreeRegressor) and not hasattr(est, "monotonic_cst"):
+                        est.monotonic_cst = None
+    except Exception:
+        pass
+    return model
 
 ensure_model()
 
@@ -47,10 +69,12 @@ def load_assets():
         st.stop()
     choices = read_json_resilient(CHOICES_PATH, {"Town": [], "Type": []})
     model = load(MODEL_PATH)
+    model = patch_forest_monotonic(model)
     return model, features, choices
 
 model, features, choices = load_assets()
 
+# -------------------- UI --------------------
 cat_cols = ["Town", "Type"]
 num_cols = [c for c in features if c not in cat_cols]
 
@@ -111,4 +135,6 @@ if submitted:
             st.write(row)
     except Exception as e:
         st.error(f"Prediction failed: {e}")
+
+
 
