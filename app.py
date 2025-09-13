@@ -3,10 +3,16 @@ import pandas as pd
 from joblib import load
 import json
 from pathlib import Path
+import requests
 
 st.set_page_config(page_title="🏠 House Price (€/m²) Predictor", layout="centered")
 
-MODEL_PATH = "rf_price_per_m2.joblib"
+MODEL_PATH = Path("rf_price_per_m2.joblib")
+if not MODEL_PATH.exists():
+    st.warning("Downloading model file... (first run only)")
+    url = "https://drive.google.com/file/d/1vPIL6uwvfknWttb4CzS8WDogmUI2i0nf/view?usp=drive_link"
+    r = requests.get(url)
+    MODEL_PATH.write_bytes(r.content)
 FEATURES_PATH = "rf_price_features.json"
 CHOICES_PATH = "choices.json"
 
@@ -110,3 +116,4 @@ if submitted:
             st.write(row)
     except Exception as e:
         st.error(f"Prediction failed: {e}")
+
