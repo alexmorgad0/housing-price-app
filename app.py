@@ -26,7 +26,8 @@ def ensure_model():
         st.stop()
 
 def read_json_resilient(path: Path, default):
-    if not path.exists(): return default
+    if not path.exists():
+        return default
     for enc in ("utf-8", "latin-1"):
         try:
             with open(path, "r", encoding=enc) as f:
@@ -80,46 +81,70 @@ with st.form("inputs"):
             options=choices.get("Type", []), index=None, placeholder="Start typing…"
         ) or ""
 
+    # integer defaults
     defaults = {
         "TotalArea": 80, "TotalRooms": 3, "NumberOfBathrooms": 1,
         "Parking": 0, "Elevator": 0,
-        "drive_min_final": 20.0, "drive_km_final": 10.0,
-        "no_transit_route": 0, "travel_min_final": 30.0,
+        "drive_min_final": 20, "drive_km_final": 10,
+        "no_transit_route": 0, "travel_min_final": 30,
     }
 
     # Left column
     with c1:
-        inputs["TotalArea"] = st.number_input("Total Area", value=int(defaults["TotalArea"]),
-                                              step=1, min_value=0, format="%d")
-        inputs["TotalRooms"] = st.number_input("Number of Rooms", value=int(defaults["TotalRooms"]),
-                                               step=1, min_value=0, format="%d")
-        inputs["Parking"] = st.number_input("Number of Parking Spots", value=int(defaults["Parking"]),
-                                            step=1, min_value=0, format="%d")
-        inputs["drive_km_final"] = st.number_input("Distance by Car to City Center (km)",
-                                                   value=float(defaults["drive_km_final"]))
+        inputs["TotalArea"] = st.number_input(
+            "Total Area",
+            value=int(defaults["TotalArea"]),
+            step=1, min_value=0, format="%d"
+        )
+        inputs["TotalRooms"] = st.number_input(
+            "Number of Rooms",
+            value=int(defaults["TotalRooms"]),
+            step=1, min_value=0, format="%d"
+        )
+        inputs["Parking"] = st.number_input(
+            "Number of Parking Spots",
+            value=int(defaults["Parking"]),
+            step=1, min_value=0, format="%d"
+        )
+        inputs["drive_km_final"] = st.number_input(
+            "Distance by Car to City Center (km)",
+            value=int(defaults["drive_km_final"]),
+            step=1, min_value=0, format="%d"
+        )
 
     # Right column (set transport availability + car time first)
     with c2:
-        inputs["NumberOfBathrooms"] = st.number_input("Number of Bathrooms", value=int(defaults["NumberOfBathrooms"]),
-                                                      step=1, min_value=0, format="%d")
-        inputs["Elevator"] = st.number_input("Has Elevator?  (0 = No, 1 = Yes)",
-                                             value=int(defaults["Elevator"]), step=1, min_value=0, max_value=1, format="%d")
-        inputs["drive_min_final"] = st.number_input("Travel Time To City Center by Car (minutes)",
-                                                    value=float(defaults["drive_min_final"]))
+        inputs["NumberOfBathrooms"] = st.number_input(
+            "Number of Bathrooms",
+            value=int(defaults["NumberOfBathrooms"]),
+            step=1, min_value=0, format="%d"
+        )
+        inputs["Elevator"] = st.number_input(
+            "Has Elevator?  (0 = No, 1 = Yes)",
+            value=int(defaults["Elevator"]),
+            step=1, min_value=0, max_value=1, format="%d"
+        )
+        inputs["drive_min_final"] = st.number_input(
+            "Travel Time To City Center by Car (minutes)",
+            value=int(defaults["drive_min_final"]),
+            step=1, min_value=0, format="%d"
+        )
         inputs["no_transit_route"] = st.number_input(
             "Has viable Transportation close by?  (1 = No transports, 0 = Has transports)",
-            value=int(defaults["no_transit_route"]), step=1, min_value=0, max_value=1, format="%d"
+            value=int(defaults["no_transit_route"]),
+            step=1, min_value=0, max_value=1, format="%d"
         )
 
     # Transit time: show input only if transports exist; otherwise auto-use car time
     with c1:
         if inputs["no_transit_route"] == 1:
-            inputs["travel_min_final"] = float(inputs["drive_min_final"])
+            inputs["travel_min_final"] = int(inputs["drive_min_final"])
             st.info("No viable transportation: using **car time** as transit time.")
         else:
             inputs["travel_min_final"] = st.number_input(
                 "Travel Time To City Center by Transports (minutes)  — if none, we’ll use the car time",
-                value=float(defaults["travel_min_final"])
+                value=int(defaults["travel_min_final"]),
+                step=1, min_value=0, format="%d"
             )
 
     submitted = st.form_submit_button("Predict")
@@ -129,6 +154,18 @@ st.caption("ℹ️ Travel times were computed assuming departure at **08:00** on
 if submitted:
     # build row in training order
     row = {k: inputs.get(k, None) for k in features}
+
+    # ensure numeric fields are numeric (some models are strict)
+    for k in num_cols:
+        v = row.get(k)
+        if isinstance(v, str) and v.strip() == "":
+            row[k] = 0
+        # keep ints as ints; floats unchanged if your pipeline expects floats
+        try:
+            row[k] = float(row[k])
+        except Exception:
+            row[k] = 0.0
+
     X = pd.DataFrame([row])
     try:
         ppm2 = float(model.predict(X)[0])
